@@ -37,99 +37,58 @@ test:
 
 predeploy:
   linux:
-    - |
-      set -e
-      mkdir -p dist
-      VERSION="${VERSION:-0.1.0}"
-      BIN="${BIN:-zbuild}"
-      test -f "target/release/${BIN}" || { echo "missing target/release/${BIN}. Did you run build?"; exit 1; }
-      cp "target/release/${BIN}" "dist/${BIN}"
+    - 'mkdir -p dist'
+    - 'export VERSION="${VERSION:-0.1.0}"'
+    - 'export BIN=zbuild'
+    - 'test -f "target/release/${BIN}" || { echo "missing target/release/${BIN}. Did you run build?"; exit 1; }'
+    - 'cp "target/release/${BIN}" "dist/${BIN}"'
+    - 'echo "Packaged ${BIN} ${VERSION} -> dist/"'
   macos:
-    - |
-      set -e
-      mkdir -p dist
-      BIN="${BIN:-zbuild}"
-      VERSION="${VERSION:-0.1.0}"
-      SRC="target/release/${BIN}"
-      test -f "${SRC}" || { echo "missing ${SRC}. Run build first."; exit 1; }
-      cp "${SRC}" "dist/${BIN}"
-      (command -v strip >/dev/null 2>&1 && strip -x "dist/${BIN}") || true
-      echo "Packaged ${BIN} ${VERSION} -> dist/"
+    - mkdir -p dist
+    - export BIN=zbuild
+    - export VERSION="${VERSION:-0.1.0}"
+    - export SRC="target/release/${BIN}"
+    - test -f "${SRC}" || { echo "missing ${SRC}. Run build first."; exit 1; }
+    - cp "${SRC}" "dist/${BIN}"
+    - (command -v strip >/dev/null 2>&1 && strip -x "dist/${BIN}") || true
+    - echo "Packaged ${BIN} ${VERSION} -> dist/"
   windows:
-    - | 
-      powershell -Command ^
-      "$ErrorActionPreference='Stop';" ^
-      "New-Item -ItemType Directory -Force -Path dist | Out-Null;" ^
-      "$env:BIN = if ($env:BIN) { $env:BIN } else { 'zbuild' };" ^
-      "$src = \"target\\release\\$env:BIN.exe\";" ^
-      "if (!(Test-Path $src)) { throw \"missing $src. Run build first.\" };" ^
-      "Copy-Item $src dist\\;" ^
-      "Write-Output \"Packaged $env:BIN -> dist\\\""
+    - 'powershell -Command "$ErrorActionPreference=''Stop''"'
+    - 'powershell -Command "New-Item -ItemType Directory -Force -Path dist | Out-Null"'
+    - 'powershell -Command "$env:BIN = ''zbuild''"'
+    - 'powershell -Command "$src = \"target\\release\\$env:BIN.exe\""'
+    - 'powershell -Command "if (!(Test-Path $src)) { throw \"missing $src. Run build first.\" }"'
+    - 'powershell -Command "Copy-Item $src dist\\"'
+    - 'powershell -Command "Write-Output \"Packaged $env:BIN -> dist\\\""' 
 
 deploy:
   linux:
-    - |
-      set -euo pipefail
-      echo "Deploying…"
-      echo "Available artifacts:"
-      ls -lah dist
-
-      # Stage artifacts (adjust the path if needed)
-      git add . || true
-
-      # Check if anything changed before committing
-      if git diff-index --quiet HEAD --; then
-        echo "No changes to deploy. Skipping commit and push."
-        exit 0
-      fi
-
-      git commit -m "${COMMIT_MESSAGE:-Deploying artifacts}"
-
-      echo "Pushing to origin main…"
-      git push origin main
-
-      echo "Deploy complete."
+    - 'echo "Deploying…"'
+    - 'ls -lah .'
+    - 'git add . || true'
+    - 'if git diff-index --quiet HEAD --; then echo "No changes to deploy. Skipping commit and push."; exit 0; fi'
+    - 'git commit -m "${COMMIT_MESSAGE:-Automated deployment commit}"'
+    - 'echo "Pushing to origin main…"'
+    - 'git push origin main'
+    - 'echo "Deploy complete."'
   macos:
-    - |
-      set -euo pipefail
-      echo "Deploying…"
-      echo "Available artifacts:"
-      ls -lah dist
-
-      # Stage artifacts (adjust the path if needed)
-      git add . || true
-
-      # Check if anything changed before committing
-      if git diff-index --quiet HEAD --; then
-        echo "No changes to deploy. Skipping commit and push."
-        exit 0
-      fi
-
-      git commit -m "${COMMIT_MESSAGE:-Deploying artifacts}"
-
-      echo "Pushing to origin main…"
-      git push origin main
-
-      echo "Deploy complete."
+    - 'echo "Deploying…"'
+    - 'ls -lah .'
+    - 'git add . || true'
+    - 'if git diff-index --quiet HEAD --; then echo "No changes to deploy. Skipping commit and push."; exit 0; fi'
+    - 'git commit -m "${COMMIT_MESSAGE:-Automated deployment commit}"'
+    - 'echo "Pushing to origin main…"'
+    - 'git push origin main'
+    - 'echo "Deploy complete."'
   windows:
-    - |
-      $ErrorActionPreference = "Stop"
-      Write-Host "Deploying…"
-      Write-Host "Available artifacts:"
-      Get-ChildItem -Force dist
-
-      git add . 2>$null
-
-      # Check if there are changes
-      $diff = git diff-index --quiet HEAD --; if ($LASTEXITCODE -eq 0) {
-          Write-Host "No changes to deploy. Skipping commit and push."
-          exit 0
-      }
-
-      git commit -m "${env:COMMIT_MESSAGE -or 'Deploying artifacts'}"
-      Write-Host "Pushing to origin main…"
-      git push origin main
-      Write-Host "Deploy complete."  
+      - 'powershell -Command "Write-Host ''Deploying…''"'
+      - 'powershell -Command "Get-ChildItem -Force ."'
+      - 'powershell -Command "git add . 2>$null"'
+      - 'powershell -Command "$diff = git diff-index --quiet HEAD --; if ($LASTEXITCODE -eq 0) { Write-Host ''No changes to deploy. Skipping commit and push.''; exit 0 }"'
+      - 'powershell -Command "git commit -m \"$(if ($env:COMMIT_MESSAGE) { $env:COMMIT_MESSAGE } else { ''Automated deployment commit'' })\""'
+      - 'powershell -Command "Write-Host ''Pushing to origin main…''"'
+      - 'powershell -Command "git push origin main"'
+      - 'powershell -Command "Write-Host ''Deploy complete.''"'
 
 clean:
   linux:
