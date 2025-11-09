@@ -69,7 +69,7 @@ pub struct RunOptions<'a> {
     pub sections: Option<Vec<Section>>,
 }
 
-pub fn run_tasks(tasks: &Tasks, opts: &RunOptions) -> Result<(), RunnerError> {
+pub fn run_tasks(tasks: &Tasks, opts: &mut RunOptions) -> Result<(), RunnerError> {
     let order = tasks.ordered_sections();
     let filter: Option<std::collections::HashSet<&'static str>> = opts
         .sections
@@ -167,16 +167,18 @@ fn commands_for_os<'a>(pc: &'a PlatformCommands, os: &str) -> Option<&'a Vec<Str
     }
 }
 
-fn run_shell(cmdline: &str, opts: &RunOptions) -> Result<ExitStatus, RunnerError> {
+fn run_shell(cmdline: &str, opts: &mut RunOptions) -> Result<ExitStatus, RunnerError> {
     let mut cmd = if opts.os == "windows" {
         let mut c = Command::new("cmd");
-        c.arg("/C").arg(cmdline);
+        c.arg("/C")
+            .arg(cmdline.to_string() + "; set > .env.vars.zbuild");
         c.env("TERM", "xterm-256color");
         c.env("ANSICON", "1");
         c
     } else {
         let mut c = Command::new("sh");
-        c.arg("-c").arg(cmdline);
+        c.arg("-c")
+            .arg(cmdline.to_string() + "; env > .env.vars.zbuild");
         c.env("TERM", "xterm-256color");
         c
     };
@@ -195,5 +197,32 @@ fn run_shell(cmdline: &str, opts: &RunOptions) -> Result<ExitStatus, RunnerError
         .spawn()?;
 
     let status = child.wait()?;
+
+    // Read .env.vars from previous command if exists
+    let env_vars_path = if let Some(ref dir) = opts.cwd {
+        dir.join(".env.vars.zbuild")
+    } else {
+        PathBuf::from(".env.vars.zbuild")
+    };
+
+    if env_vars_path.exists()
+        && let Ok(content) = std::fs::read_to_string(&env_vars_path)
+    {
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if let Some((k, v)) = line.split_once('=') {
+                opts.extra_env.insert(k.to_string(), v.to_string());
+            }
+        }
+    }
+
+    // Clean up .env.vars after reading
+    if env_vars_path.exists() {
+        let _ = std::fs::remove_file(&env_vars_path);
+    }
+
     Ok(status)
 }

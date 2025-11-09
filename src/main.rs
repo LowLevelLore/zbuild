@@ -1,5 +1,9 @@
 use log::{debug, info, warn};
-use std::{env, fs, path::PathBuf, process};
+use std::{
+    env, fs,
+    path::PathBuf,
+    process::{self, Command, Stdio},
+};
 
 mod error;
 mod parser;
@@ -144,7 +148,7 @@ fn real_main() -> Result<(), RunnerError> {
         }
     }
 
-    let opts = RunOptions {
+    let mut opts = RunOptions {
         os,
         cwd: Some(cwd),
         extra_env,
@@ -157,7 +161,58 @@ fn real_main() -> Result<(), RunnerError> {
         },
     };
 
-    run_tasks(&tasks, &opts)?;
+    let mut cmd = if opts.os == "windows" {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg("set > .env.vars.zbuild");
+        c.env("TERM", "xterm-256color");
+        c.env("ANSICON", "1");
+        c
+    } else {
+        let mut c = Command::new("sh");
+        c.arg("-c").arg("env > .env.vars.zbuild");
+        c.env("TERM", "xterm-256color");
+        c
+    };
+
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()?;
+
+    let status = child.wait()?;
+
+    if !status.success() {
+        return Err(RunnerError::CmdFailed(
+            "failed to initialize environment variables".to_string(),
+        ));
+    }
+
+    let env_vars_path = if let Some(ref dir) = opts.cwd {
+        dir.join(".env.vars.zbuild")
+    } else {
+        PathBuf::from(".env.vars.zbuild")
+    };
+
+    if env_vars_path.exists()
+        && let Ok(content) = std::fs::read_to_string(&env_vars_path)
+    {
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if let Some((k, v)) = line.split_once('=') {
+                opts.extra_env.insert(k.to_string(), v.to_string());
+            }
+        }
+    }
+
+    if env_vars_path.exists() {
+        let _ = std::fs::remove_file(&env_vars_path);
+    }
+
+    run_tasks(&tasks, &mut opts)?;
     info!(
         "{}",
         format_args!("{}", "All tasks completed successfully.".green())
