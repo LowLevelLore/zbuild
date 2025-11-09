@@ -1,0 +1,19 @@
+prebuild:
+  linux:
+    - "echo \"Prebuild (linux)\""
+    - "ls --color=auto"
+  windows:
+    - "echo Prebuild (windows)"
+build:
+  linux:
+    - "cargo build --release"
+test:
+  linux:
+    - "cargo test -- --nocapture"
+deploy:
+  linux:
+    - "echo Deploying..."
+    - "echo $SECRET_KEY"
+clean:
+  linux:
+    - "rm -rf target/"
