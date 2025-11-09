@@ -1,19 +1,140 @@
 prebuild:
   linux:
-    - "echo \"Prebuild (linux)\""
-    - "ls --color=auto"
+    - 'echo "Prebuild (linux)"'
+    - 'rustc --version'
+    - 'cargo --version'
+    - 'ls --color=auto'
+    - 'cargo fmt --all -- --check'
+    - 'cargo clippy --all-targets --all-features -- -D warnings'
+  macos:
+    - 'echo "Prebuild (macos)"'
+    - 'rustc --version'
+    - 'cargo --version'
+    - 'ls -G'
+    - 'cargo fmt --all -- --check'
+    - 'cargo clippy --all-targets --all-features -- -D warnings'
   windows:
-    - "echo Prebuild (windows)"
+    - 'echo Prebuild (windows)'
+    - 'rustc --version'
+    - 'cargo --version'
+    - 'dir'
+    - 'cargo fmt --all -- --check'
+    - 'cargo clippy --all-targets --all-features -- -D warnings'
 build:
   linux:
-    - "cargo build --release"
+    - 'cargo build --release'
+  macos:
+    - 'cargo build --release'
+  windows:
+    - 'cargo build --release'
 test:
   linux:
-    - "cargo test -- --nocapture"
+    - 'cargo test --all -- --nocapture'
+  macos:
+    - 'cargo test --all -- --nocapture'
+  windows:
+    - 'cargo test --all -- --nocapture'
+
+predeploy:
+  linux:
+    - |
+      set -e
+      mkdir -p dist
+      VERSION="${VERSION:-0.1.0}"
+      BIN="${BIN:-zbuild}"
+      test -f "target/release/${BIN}" || { echo "missing target/release/${BIN}. Did you run build?"; exit 1; }
+      cp "target/release/${BIN}" "dist/${BIN}"
+  macos:
+    - |
+      set -e
+      mkdir -p dist
+      BIN="${BIN:-zbuild}"
+      VERSION="${VERSION:-0.1.0}"
+      SRC="target/release/${BIN}"
+      test -f "${SRC}" || { echo "missing ${SRC}. Run build first."; exit 1; }
+      cp "${SRC}" "dist/${BIN}"
+      (command -v strip >/dev/null 2>&1 && strip -x "dist/${BIN}") || true
+      echo "Packaged ${BIN} ${VERSION} -> dist/"
+  windows:
+    - | 
+      powershell -Command ^
+      "$ErrorActionPreference='Stop';" ^
+      "New-Item -ItemType Directory -Force -Path dist | Out-Null;" ^
+      "$env:BIN = if ($env:BIN) { $env:BIN } else { 'zbuild' };" ^
+      "$src = \"target\\release\\$env:BIN.exe\";" ^
+      "if (!(Test-Path $src)) { throw \"missing $src. Run build first.\" };" ^
+      "Copy-Item $src dist\\;" ^
+      "Write-Output \"Packaged $env:BIN -> dist\\\""
+
 deploy:
   linux:
-    - "echo Deploying..."
-    - "echo $SECRET_KEY"
+    - |
+      set -euo pipefail
+      echo "Deploying…"
+      echo "Available artifacts:"
+      ls -lah dist
+
+      # Stage artifacts (adjust the path if needed)
+      git add . || true
+
+      # Check if anything changed before committing
+      if git diff-index --quiet HEAD --; then
+        echo "No changes to deploy. Skipping commit and push."
+        exit 0
+      fi
+
+      git commit -m "${COMMIT_MESSAGE:-Deploying artifacts}"
+
+      echo "Pushing to origin main…"
+      git push origin main
+
+      echo "Deploy complete."
+  macos:
+    - |
+      set -euo pipefail
+      echo "Deploying…"
+      echo "Available artifacts:"
+      ls -lah dist
+
+      # Stage artifacts (adjust the path if needed)
+      git add . || true
+
+      # Check if anything changed before committing
+      if git diff-index --quiet HEAD --; then
+        echo "No changes to deploy. Skipping commit and push."
+        exit 0
+      fi
+
+      git commit -m "${COMMIT_MESSAGE:-Deploying artifacts}"
+
+      echo "Pushing to origin main…"
+      git push origin main
+
+      echo "Deploy complete."
+  windows:
+    - |
+      $ErrorActionPreference = "Stop"
+      Write-Host "Deploying…"
+      Write-Host "Available artifacts:"
+      Get-ChildItem -Force dist
+
+      git add . 2>$null
+
+      # Check if there are changes
+      $diff = git diff-index --quiet HEAD --; if ($LASTEXITCODE -eq 0) {
+          Write-Host "No changes to deploy. Skipping commit and push."
+          exit 0
+      }
+
+      git commit -m "${env:COMMIT_MESSAGE -or 'Deploying artifacts'}"
+      Write-Host "Pushing to origin main…"
+      git push origin main
+      Write-Host "Deploy complete."  
+
 clean:
   linux:
-    - "rm -rf target/"
+    - 'rm -rf target/ dist/'
+  macos:
+    - 'rm -rf target/ dist/'
+  windows:
+    - 'rmdir /S /Q target 2>nul & rmdir /S /Q dist 2>nul & echo Cleaned.'

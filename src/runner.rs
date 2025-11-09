@@ -82,7 +82,10 @@ pub fn run_tasks(tasks: &Tasks, opts: &RunOptions) -> Result<(), RunnerError> {
             if !filt.contains(&section_name) {
                 continue;
             }
-        } else if section_name == Section::Clean.as_str() {
+        } else if section_name == Section::Clean.as_str()
+            || section_name == Section::PostDeploy.as_str()
+            || section_name == Section::Deploy.as_str()
+        {
             continue;
         }
 

@@ -147,7 +147,7 @@ fn real_main() -> Result<(), RunnerError> {
     let opts = RunOptions {
         os,
         cwd: Some(cwd),
-        extra_env: extra_env,
+        extra_env,
         continue_on_error: cli.continue_on_error,
         dry_run: cli.dry_run,
         sections: if cli.sections.is_empty() {
@@ -160,7 +160,7 @@ fn real_main() -> Result<(), RunnerError> {
     run_tasks(&tasks, &opts)?;
     info!(
         "{}",
-        format!("{}", "All tasks completed successfully.".green())
+        format_args!("{}", "All tasks completed successfully.".green())
     );
     Ok(())
 }
