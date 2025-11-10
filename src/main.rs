@@ -5,19 +5,17 @@ use std::{
     process::{self, Command, Stdio},
 };
 
+mod config_model;
 mod error;
 mod parser;
 mod runner;
-mod task_model;
 
 use crate::{
     error::RunnerError,
-    parser::parse_tasks_yaml,
-    runner::{RunOptions, Section, run_tasks},
+    runner::{RunOptions, Section, run},
 };
-use colored::Colorize;
-
 use clap::{Parser, ValueEnum};
+use colored::Colorize;
 
 #[derive(Debug, Parser)]
 #[command(name = "zmake-tasks-runner", version, about)]
@@ -45,7 +43,7 @@ struct Cli {
     dry_run: bool,
 
     /// Extra environment variables for child processes (KEY=VALUE). Can be repeated.
-    #[arg(long = "env", value_name = "KV", value_parser = parse_kv)]
+    #[arg(long = "env", value_name = "KV", value_parser = parser::parse_kv)]
     envs: Vec<(String, String)>,
 
     /// Extra environment variables for child processes from a file (KEY=VALUE per line).
@@ -62,16 +60,6 @@ enum OsChoice {
     Windows,
     Linux,
     Macos,
-}
-
-fn parse_kv(s: &str) -> Result<(String, String), String> {
-    let (k, v) = s
-        .split_once('=')
-        .ok_or_else(|| "expected KEY=VALUE".to_string())?;
-    if k.is_empty() {
-        return Err("key cannot be empty".into());
-    }
-    Ok((k.to_string(), v.to_string()))
 }
 
 fn main() {
@@ -97,7 +85,7 @@ fn real_main() -> Result<(), RunnerError> {
 
     let yaml = fs::read_to_string(&cli.file)?;
     debug!("loaded yaml from {:?}", cli.file);
-    let tasks = parse_tasks_yaml(&yaml)?;
+    let config = parser::parse_yaml(&yaml)?;
 
     let detected_os = env::consts::OS;
 
@@ -142,7 +130,7 @@ fn real_main() -> Result<(), RunnerError> {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            let (k, v) = parse_kv(line)
+            let (k, v) = parser::parse_kv(line)
                 .map_err(|e| RunnerError::CmdFailed(format!("env-file parse error: {}", e)))?;
             extra_env.insert(k, v);
         }
@@ -212,7 +200,7 @@ fn real_main() -> Result<(), RunnerError> {
         let _ = std::fs::remove_file(&env_vars_path);
     }
 
-    run_tasks(&tasks, &mut opts)?;
+    run(&config, &mut opts)?;
     info!(
         "{}",
         format_args!("{}", "All tasks completed successfully.".green())

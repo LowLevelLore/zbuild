@@ -1,4 +1,4 @@
-use log::{debug, info, warn};
+use log::{info, warn};
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -8,8 +8,8 @@ use std::{
 use colored::Colorize;
 
 use crate::{
+    config_model::{Config, PlatformCommands},
     error::RunnerError,
-    task_model::{PlatformCommands, Tasks},
 };
 use clap::ValueEnum;
 
@@ -69,15 +69,22 @@ pub struct RunOptions<'a> {
     pub sections: Option<Vec<Section>>,
 }
 
-pub fn run_tasks(tasks: &Tasks, opts: &mut RunOptions) -> Result<(), RunnerError> {
-    let order = tasks.ordered_sections();
+fn commands_for_os<'a>(pc: &'a PlatformCommands, os: &str) -> Option<&'a Vec<String>> {
+    match os {
+        "windows" => pc.windows.steps.as_ref(),
+        "linux" => pc.linux.steps.as_ref(),
+        "macos" => pc.macos.steps.as_ref(),
+        _ => None,
+    }
+}
+
+pub fn run(config: &Config, opts: &mut RunOptions) -> Result<(), RunnerError> {
+    let mut overall_failures: Vec<String> = Vec::new();
     let filter: Option<std::collections::HashSet<&'static str>> = opts
         .sections
         .as_ref()
         .map(|v| v.iter().map(|s| s.as_str()).collect());
-    let mut failures: Vec<String> = Vec::new();
-
-    for (section_name, section_opt) in order {
+    for (section_name, commands) in config.tasks.ordered_sections() {
         if let Some(ref filt) = filter {
             if !filt.contains(&section_name) {
                 continue;
@@ -88,83 +95,156 @@ pub fn run_tasks(tasks: &Tasks, opts: &mut RunOptions) -> Result<(), RunnerError
         {
             continue;
         }
-
-        if let Some(section) = section_opt {
-            let commands = commands_for_os(section, opts.os);
-
-            if commands.is_none() || commands.as_ref().unwrap().is_empty() {
-                continue;
-            }
-
-            info!(
-                "{}",
-                format!(
-                    "----- [{}] -----",
-                    Section::get_section(section_name).as_str()
-                )
-                .blue()
-            );
-
-            if let Some(cmds) = commands {
-                for cmd in cmds {
-                    info!("{} {}", "$".cyan(), cmd.cyan());
-                    if opts.dry_run {
+        match commands {
+            Some(c) => {
+                let result = match commands_for_os(c, opts.os) {
+                    Some(cmds) => run_section(section_name, config, cmds, opts),
+                    None => {
                         continue;
                     }
-                    match run_shell(cmd, opts) {
-                        Ok(status) if status.success() => {}
-                        Ok(status) => {
-                            let msg = format!(
-                                "section '{}' command failed: '{}' (exit {:?})",
-                                section_name,
-                                cmd,
-                                status.code()
+                };
+                match result {
+                    Ok(_) => {}
+                    Err(e) => {
+                        if opts.continue_on_error {
+                            warn!(
+                                "{}",
+                                format!("section '{}' failed with error: {}", section_name, e)
+                                    .yellow()
                             );
-                            if opts.continue_on_error {
-                                warn!("{}", msg);
-                                failures.push(msg);
-                            } else {
-                                return Err(RunnerError::CmdFailed(msg));
-                            }
-                        }
-                        Err(e) => {
-                            let msg = format!(
-                                "section '{}' command spawn error: '{}' -> {}",
-                                section_name, cmd, e
-                            );
-                            if opts.continue_on_error {
-                                warn!("{}", msg);
-                                failures.push(msg);
-                            } else {
-                                return Err(RunnerError::CmdFailed(msg));
-                            }
+                            overall_failures.push(format!("section '{}': {:?}", section_name, e));
+                        } else {
+                            return Err(e);
                         }
                     }
                 }
-            } else {
-                debug!("no commands for {} in {}", opts.os, section_name);
+            }
+            None => {
+                continue;
+            }
+        };
+    }
+    if !overall_failures.is_empty() {
+        return Err(RunnerError::CmdFailed(overall_failures.join("\n")));
+    }
+    Ok(())
+}
+
+pub fn run_section(
+    section_name: &str,
+    config: &Config,
+    tasks: &Vec<String>,
+    opts: &mut RunOptions,
+) -> Result<(), RunnerError> {
+    info!(
+        "{}",
+        format!(
+            "----- [{}] -----",
+            Section::get_section(section_name).as_str()
+        )
+        .blue()
+    );
+    run_tasks(tasks, config, opts, section_name)
+}
+
+pub fn run_block(
+    block_name: &str,
+    config: &Config,
+    opts: &mut RunOptions,
+) -> Result<(), RunnerError> {
+    info!("{}", format!("--- [Block: {}] ---", block_name).magenta());
+    if let Some(tasks) = config.blocks.get(block_name) {
+        match &tasks.steps {
+            Some(steps) => run_tasks(steps, config, opts, block_name),
+            None => Ok(()),
+        }
+    } else {
+        Err(RunnerError::CmdFailed(format!(
+            "Block '{}' not found",
+            block_name
+        )))
+    }
+}
+
+pub fn run_tasks(
+    tasks: &Vec<String>,
+    config: &Config,
+    opts: &mut RunOptions,
+    parent_name: &str,
+) -> Result<(), RunnerError> {
+    let order = tasks;
+
+    let mut failures: Vec<String> = Vec::new();
+
+    for task in order {
+        if task.trim().is_empty() {
+            continue;
+        }
+        if task.split(" ").collect::<Vec<&str>>().len() == 1
+            && !task.starts_with("'")
+            && !task.starts_with("\"")
+        {
+            // This is a block reference
+            let block_name = task.trim();
+            if config.blocks.contains_key(block_name) {
+                match run_block(block_name, config, opts) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        let msg = format!(
+                            "Block '{}' execution failed in parent '{}': {}",
+                            block_name, parent_name, e
+                        );
+                        if opts.continue_on_error {
+                            warn!("{}", msg);
+                            failures.push(msg);
+                        } else {
+                            return Err(RunnerError::CmdFailed(msg));
+                        }
+                    }
+                }
+            }
+        }
+        info!("{} {}", "$".cyan(), task.cyan());
+        if opts.dry_run {
+            continue;
+        }
+        match run_shell(task, opts) {
+            Ok(status) if status.success() => {}
+            Ok(status) => {
+                let msg = format!(
+                    "Parent '{}' command failed: '{}' (exit {:?})",
+                    parent_name,
+                    task,
+                    status.code()
+                );
+                if opts.continue_on_error {
+                    warn!("{}", msg);
+                    failures.push(msg);
+                } else {
+                    return Err(RunnerError::CmdFailed(msg));
+                }
+            }
+            Err(e) => {
+                let msg = format!(
+                    "Parent '{}' command spawn error: '{}' -> {}",
+                    parent_name, task, e
+                );
+                if opts.continue_on_error {
+                    warn!("{}", msg);
+                    failures.push(msg);
+                } else {
+                    return Err(RunnerError::CmdFailed(msg));
+                }
             }
         }
     }
 
     if !failures.is_empty() {
-        let joined = failures.join(
-            "
-",
-        );
+        let joined = failures.join("\n");
         return Err(RunnerError::CmdFailed(joined));
     }
 
     Ok(())
-}
-
-fn commands_for_os<'a>(pc: &'a PlatformCommands, os: &str) -> Option<&'a Vec<String>> {
-    match os {
-        "windows" => pc.windows.as_ref(),
-        "linux" => pc.linux.as_ref(),
-        "macos" => pc.macos.as_ref(),
-        _ => None,
-    }
 }
 
 fn run_shell(cmdline: &str, opts: &mut RunOptions) -> Result<ExitStatus, RunnerError> {

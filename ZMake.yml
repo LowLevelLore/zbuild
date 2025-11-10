@@ -1,99 +1,122 @@
-prebuild:
-  linux:
-    - 'echo "Prebuild (linux)"'
-    - 'rustc --version'
-    - 'cargo --version'
-    - 'ls --color=auto'
-    - 'cargo fmt --all -- --check'
-    - 'cargo clippy --all-targets --all-features -- -D warnings'
-  macos:
-    - 'echo "Prebuild (macos)"'
-    - 'rustc --version'
-    - 'cargo --version'
-    - 'ls -G'
-    - 'cargo fmt --all -- --check'
-    - 'cargo clippy --all-targets --all-features -- -D warnings'
-  windows:
-    - 'echo Prebuild (windows)'
-    - 'rustc --version'
-    - 'cargo --version'
-    - 'dir'
-    - 'cargo fmt --all -- --check'
-    - 'cargo clippy --all-targets --all-features -- -D warnings'
-build:
-  linux:
-    - 'cargo build --release'
-  macos:
-    - 'cargo build --release'
-  windows:
-    - 'cargo build --release'
-test:
-  linux:
-    - 'cargo test --all -- --nocapture'
-  macos:
-    - 'cargo test --all -- --nocapture'
-  windows:
-    - 'cargo test --all -- --nocapture'
+tasks:
+  prebuild:
+    linux:
+      steps:
+        - echo "Prebuild (linux)"
+        - ls -la --color=auto
+        - build_common
+    macos:
+      steps:
+        - echo "Prebuild (macos)"
+        - ls -G
+        - build_common
+    windows:
+      steps:     
+        - echo Prebuild (windows)
+        - dir
+        - build_common
+  build:
+    linux:
+      steps:
+        - cargo build --release
+    macos:
+      steps:
+        - cargo build --release
+    windows:
+      steps:
+        - cargo build --release
+  test:
+    linux:
+      steps:
+        - cargo test --all -- --nocapture
+    macos:
+      steps:
+        - cargo test --all -- --nocapture
+    windows:
+      steps:
+        - cargo test --all -- --nocapture
 
-predeploy:
-  linux:
-    - 'mkdir -p dist'
-    - 'export VERSION="${VERSION:-0.1.0}"'
-    - 'export BIN=zbuild'
-    - 'test -f "target/release/${BIN}" || { echo "missing target/release/${BIN}. Did you run build?"; exit 1; }'
-    - 'cp "target/release/${BIN}" "dist/${BIN}"'
-    - 'echo "Packaged ${BIN} ${VERSION} -> dist/"'
-  macos:
-    - mkdir -p dist
-    - export BIN=zbuild
-    - export VERSION="${VERSION:-0.1.0}"
-    - export SRC="target/release/${BIN}"
-    - test -f "${SRC}" || { echo "missing ${SRC}. Run build first."; exit 1; }
-    - cp "${SRC}" "dist/${BIN}"
-    - (command -v strip >/dev/null 2>&1 && strip -x "dist/${BIN}") || true
-    - echo "Packaged ${BIN} ${VERSION} -> dist/"
-  windows:
-    - 'powershell -Command "$ErrorActionPreference=''Stop''"'
-    - 'powershell -Command "New-Item -ItemType Directory -Force -Path dist | Out-Null"'
-    - 'powershell -Command "$env:BIN = ''zbuild''"'
-    - 'powershell -Command "$src = \"target\\release\\$env:BIN.exe\""'
-    - 'powershell -Command "if (!(Test-Path $src)) { throw \"missing $src. Run build first.\" }"'
-    - 'powershell -Command "Copy-Item $src dist\\"'
-    - 'powershell -Command "Write-Output \"Packaged $env:BIN -> dist\\\""' 
+  predeploy:
+    linux:
+      steps:
+        - mkdir -p dist
+        - export VERSION="${VERSION:-0.1.0}"
+        - export BIN=zbuild
+        - test -f "target/release/${BIN}" || { echo "missing target/release/${BIN}. Did you run build?"; exit 1; }
+        - cp "target/release/${BIN}" "dist/${BIN}"
+        - echo "Packaged ${BIN} ${VERSION} -> dist/"
+    macos:
+      steps:
+        - mkdir -p dist
+        - export BIN=zbuild
+        - export VERSION="${VERSION:-0.1.0}"
+        - export SRC="target/release/${BIN}"
+        - test -f "${SRC}" || { echo "missing ${SRC}. Run build first."; exit 1; }
+        - cp "${SRC}" "dist/${BIN}"
+        - (command -v strip >/dev/null 2>&1 && strip -x "dist/${BIN}") || true
+        - echo "Packaged ${BIN} ${VERSION} -> dist/"
+    windows:
+      steps:
+        - powershell -Command "$ErrorActionPreference=Stop"
+        - powershell -Command "New-Item -ItemType Directory -Force -Path dist | Out-Null"
+        - powershell -Command "$env:BIN = zbuild"
+        - powershell -Command "$src = \"target\\release\\$env:BIN.exe\""
+        - powershell -Command "if (!(Test-Path $src)) { throw \"missing $src. Run build first.\" }"
+        - powershell -Command "Copy-Item $src dist\\"
+        - powershell -Command "Write-Output \"Packaged $env:BIN -> dist\\\"" 
 
-deploy:
-  linux:
-    - 'echo "Deploying…"'
-    - 'ls -lah .'
-    - 'git add . || true'
-    - 'if git diff-index --quiet HEAD --; then echo "No changes to deploy. Skipping commit and push."; exit 0; fi'
-    - 'git commit -m "${COMMIT_MESSAGE:-Automated deployment commit}"'
-    - 'echo "Pushing to origin main…"'
-    - 'git push origin main'
-    - 'echo "Deploy complete."'
-  macos:
-    - 'echo "Deploying…"'
-    - 'ls -lah .'
-    - 'git add . || true'
-    - 'if git diff-index --quiet HEAD --; then echo "No changes to deploy. Skipping commit and push."; exit 0; fi'
-    - 'git commit -m "${COMMIT_MESSAGE:-Automated deployment commit}"'
-    - 'echo "Pushing to origin main…"'
-    - 'git push origin main'
-    - 'echo "Deploy complete."'
-  windows:
-      - 'powershell -Command "Write-Host ''Deploying…''"'
-      - 'powershell -Command "Get-ChildItem -Force ."'
-      - 'powershell -Command "git add . 2>$null"'
-      - 'powershell -Command "$diff = git diff-index --quiet HEAD --; if ($LASTEXITCODE -eq 0) { Write-Host ''No changes to deploy. Skipping commit and push.''; exit 0 }"'
-      - 'powershell -Command "git commit -m \"$(if ($env:COMMIT_MESSAGE) { $env:COMMIT_MESSAGE } else { ''Automated deployment commit'' })\""'
-      - 'powershell -Command "Write-Host ''Pushing to origin main…''"'
-      - 'powershell -Command "git push origin main"'
-      - 'powershell -Command "Write-Host ''Deploy complete.''"'
+  deploy:
+    linux:
+      steps:
+        - echo "Deploying…"
+        - ls -lah .
+        - git add . || true
+        - if git diff-index --quiet HEAD --; then echo "No changes to deploy. Skipping commit and push."; exit 0; fi
+        - git commit -m "${COMMIT_MESSAGE:-Automated deployment commit}"
+        - echo "Pushing to origin main…"
+        - git push origin main
+        - echo "Deploy complete."
+    macos:
+      steps:
+        - echo "Deploying…"
+        - ls -lah .
+        - git add . || true
+        - if git diff-index --quiet HEAD --; then echo "No changes to deploy. Skipping commit and push."; exit 0; fi
+        - git commit -m "${COMMIT_MESSAGE:-Automated deployment commit}"
+        - echo "Pushing to origin main…"
+        - git push origin main
+        - echo "Deploy complete."
+    windows:
+      steps:
+        - powershell -Command "Write-Host Deploying…"
+        - powershell -Command "Get-ChildItem -Force ."
+        - powershell -Command "git add . 2>$null"
+        - powershell -Command "$diff = git diff-index --quiet HEAD --; if ($LASTEXITCODE -eq 0) { Write-Host No changes to deploy. Skipping commit and push.; exit 0 }"
+        - powershell -Command "git commit -m \"$(if ($env:COMMIT_MESSAGE) { $env:COMMIT_MESSAGE } else { Automated deployment commit })\""
+        - powershell -Command "Write-Host Pushing to origin main…"
+        - powershell -Command "git push origin main"
+        - powershell -Command "Write-Host Deploy complete."
 
-clean:
-  linux:
-    - 'rm -rf target/ dist/'
-  macos:
-    - 'rm -rf target/ dist/'
-  windows:
-    - 'rmdir /S /Q target 2>nul & rmdir /S /Q dist 2>nul & echo Cleaned.'
+  clean:
+    linux:
+      steps:
+        - rm -rf target/ dist/
+        - echo "Cleaned."
+    macos:
+      steps:
+        - rm -rf target/ dist/
+        - echo "Cleaned."
+    windows:
+      steps:
+        - rmdir /S /Q target 2>nul & rmdir /S /Q dist 2>nul & echo Cleaned.
+
+blocks:
+  build_common:
+    steps:
+      - rustc --version
+      - cargo --version
+      - cargo fmt --all -- --check
+      - clippy
+  clippy:
+    steps:
+      - cargo clippy --all-targets --all-features -- -D warnings

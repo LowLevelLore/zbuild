@@ -8,6 +8,9 @@ pub enum RunnerError {
     #[error("YAML parse error: {0}")]
     Yaml(#[from] serde_yaml::Error),
 
+    #[error("Constraints error: {0}")]
+    Constraints(String),
+
     #[error("Command failed: {0}")]
     CmdFailed(String),
 }

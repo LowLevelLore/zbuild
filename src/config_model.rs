@@ -1,6 +1,20 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 
-#[derive(Debug, Deserialize)]
+pub(crate) static SECTIONS: &[&str] = &[
+    "prebuild",
+    "build",
+    "postbuild",
+    "test",
+    "predeploy",
+    "deploy",
+    "postdeploy",
+    "clean",
+];
+
+pub(crate) static OPERATING_SYSTEMS: &[&str] = &["windows", "linux", "macos"];
+
+#[derive(Debug, Deserialize, Default)]
 pub struct Tasks {
     #[serde(rename = "prebuild")]
     pub prebuild: Option<PlatformCommands>,
@@ -20,11 +34,26 @@ pub struct Tasks {
     pub clean: Option<PlatformCommands>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct Config {
+    #[serde(default)]
+    pub tasks: Tasks,
+
+    /// `blocks: { name: [ "step1", "step2" ] }`
+    #[serde(default)]
+    pub blocks: HashMap<String, Steps>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct PlatformCommands {
-    pub windows: Option<Vec<String>>,
-    pub linux: Option<Vec<String>>,
-    pub macos: Option<Vec<String>>,
+    pub windows: Steps,
+    pub linux: Steps,
+    pub macos: Steps,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Steps {
+    pub steps: Option<Vec<String>>,
 }
 
 impl Tasks {
