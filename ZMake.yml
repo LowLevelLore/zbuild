@@ -64,7 +64,6 @@ tasks:
     linux: &deploy_sh
       steps:
         - echo "Deploying…"
-        - ls -lah .
         - git add . || true
         - if git diff-index --quiet HEAD --; then echo "No changes to deploy. Skipping commit and push."; exit 0; fi
         - git commit -m "${COMMIT_MESSAGE:-Automated deployment commit}"
