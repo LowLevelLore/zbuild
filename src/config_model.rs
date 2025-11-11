@@ -36,24 +36,54 @@ pub struct Tasks {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct Config {
-    #[serde(default)]
     pub tasks: Tasks,
 
-    /// `blocks: { name: [ "step1", "step2" ] }`
     #[serde(default)]
-    pub blocks: HashMap<String, Steps>,
+    pub blocks: HashMap<String, Block>,
+
+    #[serde(rename = "config", default)]
+    pub global_config: Option<GlobalConfig>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone, PartialEq, Eq)]
+pub enum ExecutionPolicy {
+    #[default]
+    #[serde(rename = "fast_fail")]
+    FastFail,
+    #[serde(rename = "carry_forward")]
+    CarryFroward,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct GlobalConfig {
+    #[serde(rename = "execution_policy")]
+    pub execution_policy: Option<ExecutionPolicy>,
+    #[serde(rename = "env")]
+    pub env: Option<HashMap<String, String>>,
+    #[serde(rename = "skip_sections")]
+    pub banned_sections: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct PlatformCommands {
-    pub windows: Steps,
-    pub linux: Steps,
-    pub macos: Steps,
+    pub windows: Option<Block>,
+    pub linux: Option<Block>,
+    pub macos: Option<Block>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct LocalConfig {
+    #[serde(rename = "execution_policy")]
+    pub execution_policy: Option<ExecutionPolicy>,
+    #[serde(rename = "env")]
+    pub env: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Steps {
+pub struct Block {
     pub steps: Option<Vec<String>>,
+    #[serde(rename = "config")]
+    pub local_config: Option<LocalConfig>,
 }
 
 impl Tasks {

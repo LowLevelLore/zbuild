@@ -3,5 +3,5 @@
 *.log
 .DS_Store
 .env
-
+*.txt
 dist/

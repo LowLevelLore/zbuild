@@ -3,17 +3,14 @@ tasks:
     linux:
       steps:
         - echo "Prebuild (linux)"
-        - ls -la --color=auto
         - build_common
     macos:
       steps:
         - echo "Prebuild (macos)"
-        - ls -G
         - build_common
     windows:
       steps:     
         - echo Prebuild (windows)
-        - dir
         - build_common
   build:
     linux:
@@ -28,13 +25,13 @@ tasks:
   test:
     linux:
       steps:
-        - cargo test --all -- --nocapture
+        - test_cargo
     macos:
       steps:
-        - cargo test --all -- --nocapture
+        - test_cargo
     windows:
       steps:
-        - cargo test --all -- --nocapture
+        - test_cargo
 
   predeploy:
     linux:
@@ -116,7 +113,14 @@ blocks:
       - rustc --version
       - cargo --version
       - cargo fmt --all -- --check
-      - clippy
-  clippy:
+  test_cargo:
     steps:
       - cargo clippy --all-targets --all-features -- -D warnings
+      - cargo test --all -- --nocapture
+
+config:
+  skip_sections:
+    - predeploy
+    - deploy
+    - clean
+  execution_policy: fast_fail

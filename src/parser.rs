@@ -1,5 +1,6 @@
 use crate::config_model::{OPERATING_SYSTEMS, SECTIONS};
 use crate::{config_model::Config, error::RunnerError};
+use std::collections::HashMap;
 
 pub fn parse_config_yaml(yaml: &str) -> Result<Config, RunnerError> {
     let cfg: Config = serde_yaml::from_str(yaml)?;
@@ -17,7 +18,7 @@ pub fn parse_kv(s: &str) -> Result<(String, String), String> {
 }
 
 fn validate_config(_config: &Config) -> Result<(), RunnerError> {
-    _config.blocks.iter().try_for_each(|(block_name, steps)| {
+    _config.blocks.iter().try_for_each(|(block_name, _)| {
         if SECTIONS.contains(&block_name.as_str()) {
             return Err(RunnerError::Constraints(format!(
                 "Block name '{}' conflicts with reserved section name",
@@ -32,16 +33,6 @@ fn validate_config(_config: &Config) -> Result<(), RunnerError> {
             )));
         }
 
-        if let Some(step_list) = &steps.steps {
-            for step in step_list {
-                if step.trim().is_empty() {
-                    return Err(RunnerError::Constraints(format!(
-                        "Empty step found in block '{}'",
-                        block_name
-                    )));
-                }
-            }
-        }
         Ok(())
     })?;
     Ok(())
@@ -49,7 +40,6 @@ fn validate_config(_config: &Config) -> Result<(), RunnerError> {
 
 pub fn parse_yaml(yaml: &str) -> Result<Config, RunnerError> {
     let config = parse_config_yaml(yaml);
-    // println!("{:?}", config);
     match config {
         Ok(cfg) => match validate_config(&cfg) {
             Ok(_) => Ok(cfg),
@@ -60,4 +50,24 @@ pub fn parse_yaml(yaml: &str) -> Result<Config, RunnerError> {
             e
         ))),
     }
+}
+
+#[allow(dead_code)]
+fn parse_env_dump(content: &str) -> HashMap<String, String> {
+    let mut env_map = HashMap::new();
+
+    for entry in content.split('\0') {
+        if entry.is_empty() {
+            continue;
+        }
+
+        if let Some(equal_pos) = entry.find('=') {
+            let key = &entry[..equal_pos];
+            let value = &entry[equal_pos + 1..];
+
+            env_map.insert(key.to_string(), value.to_string());
+        }
+    }
+
+    env_map
 }

@@ -1,21 +1,22 @@
-use log::{debug, info, warn};
+use colored::Colorize;
+use log::{error, info, warn};
 use std::{
     env, fs,
     path::PathBuf,
-    process::{self, Command, Stdio},
+    process::{self},
 };
-
 mod config_model;
+mod environment;
 mod error;
 mod parser;
 mod runner;
 
 use crate::{
+    environment::{EnvVariableSource, Environment},
     error::RunnerError,
-    runner::{RunOptions, Section, run},
+    runner::{Section, run},
 };
 use clap::{Parser, ValueEnum};
-use colored::Colorize;
 
 #[derive(Debug, Parser)]
 #[command(name = "zmake-tasks-runner", version, about)]
@@ -33,10 +34,6 @@ struct Cli {
     os: Option<OsChoice>,
     #[arg(long = "section", value_enum)]
     sections: Vec<Section>,
-
-    /// Continue executing remaining commands when one fails. By default, fails fast.
-    #[arg(long = "continue-on-error")]
-    continue_on_error: bool,
 
     /// Print the commands without executing them.
     #[arg(long = "dry-run")]
@@ -64,7 +61,7 @@ enum OsChoice {
 
 fn main() {
     if let Err(e) = real_main() {
-        eprintln!("Error: {e}");
+        error!("{}", format!("Error: {}", e).red());
         process::exit(1);
     }
 }
@@ -84,7 +81,7 @@ fn real_main() -> Result<(), RunnerError> {
     }
 
     let yaml = fs::read_to_string(&cli.file)?;
-    debug!("loaded yaml from {:?}", cli.file);
+
     let config = parser::parse_yaml(&yaml)?;
 
     let detected_os = env::consts::OS;
@@ -119,91 +116,65 @@ fn real_main() -> Result<(), RunnerError> {
         .cwd
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-    let mut extra_env = std::collections::HashMap::new();
+    let mut default_environment = Environment::default();
+
+    let _ = default_environment.capture_default_environment();
+
+    let mut global_environment = default_environment.clone();
+
+    if let Some(global_config) = &config.global_config {
+        if let Some(exec_policy) = &global_config.execution_policy {
+            global_environment.execution_policy = exec_policy.clone();
+        }
+        if let Some(env_vars) = &global_config.env {
+            for (key, value) in env_vars {
+                global_environment.upsert_variable(
+                    key.clone(),
+                    value.clone(),
+                    EnvVariableSource::Global,
+                );
+            }
+        }
+    }
+
     for (k, v) in cli.envs {
-        extra_env.insert(k, v);
+        println!("Inserting CLI ENV {}", k);
+        global_environment.upsert_variable(k, v, environment::EnvVariableSource::Passed);
     }
     if let Some(env_file) = cli.env_file {
         let content = fs::read_to_string(env_file)?;
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let (k, v) = parser::parse_kv(line)
-                .map_err(|e| RunnerError::CmdFailed(format!("env-file parse error: {}", e)))?;
-            extra_env.insert(k, v);
-        }
+        global_environment.load_env(content, environment::EnvVariableSource::Passed);
     }
 
-    let mut opts = RunOptions {
-        os,
-        cwd: Some(cwd),
-        extra_env,
-        continue_on_error: cli.continue_on_error,
-        dry_run: cli.dry_run,
-        sections: if cli.sections.is_empty() {
-            None
-        } else {
-            Some(cli.sections)
-        },
-    };
-
-    let mut cmd = if opts.os == "windows" {
-        let mut c = Command::new("cmd");
-        c.arg("/C").arg("set > .env.vars.zbuild");
-        c.env("TERM", "xterm-256color");
-        c.env("ANSICON", "1");
-        c
+    global_environment.os = os;
+    global_environment.cwd = Some(cwd);
+    global_environment.sections = if cli.sections.is_empty() {
+        None
     } else {
-        let mut c = Command::new("sh");
-        c.arg("-c").arg("env > .env.vars.zbuild");
-        c.env("TERM", "xterm-256color");
-        c
+        Some(cli.sections)
     };
-
-    let mut child = cmd
-        .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-
-    let status = child.wait()?;
-
-    if !status.success() {
-        return Err(RunnerError::CmdFailed(
-            "failed to initialize environment variables".to_string(),
-        ));
-    }
-
-    let env_vars_path = if let Some(ref dir) = opts.cwd {
-        dir.join(".env.vars.zbuild")
-    } else {
-        PathBuf::from(".env.vars.zbuild")
-    };
-
-    if env_vars_path.exists()
-        && let Ok(content) = std::fs::read_to_string(&env_vars_path)
+    if let Some(global_config) = &config.global_config
+        && let Some(banned_sections) = &global_config.banned_sections
     {
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Some((k, v)) = line.split_once('=') {
-                opts.extra_env.insert(k.to_string(), v.to_string());
-            }
+        global_environment.banned_sections = Some(
+            banned_sections
+                .iter()
+                .map(|section| Section::get_section(Section::map_section(section)))
+                .collect(),
+        );
+    }
+
+    match run(&config, &mut global_environment) {
+        Ok(_) => {
+            info!(
+                "{}",
+                format_args!("{}", "All tasks completed successfully.".green())
+            );
+        }
+        Err(e) => {
+            return Err(e);
         }
     }
 
-    if env_vars_path.exists() {
-        let _ = std::fs::remove_file(&env_vars_path);
-    }
-
-    run(&config, &mut opts)?;
-    info!(
-        "{}",
-        format_args!("{}", "All tasks completed successfully.".green())
-    );
     Ok(())
 }

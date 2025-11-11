@@ -1,6 +1,5 @@
-use log::{info, warn};
+use log::{error, info, warn};
 use std::{
-    collections::HashMap,
     path::PathBuf,
     process::{Command, ExitStatus, Stdio},
 };
@@ -8,7 +7,8 @@ use std::{
 use colored::Colorize;
 
 use crate::{
-    config_model::{Config, PlatformCommands},
+    config_model::{Config, ExecutionPolicy, PlatformCommands},
+    environment::{EnvVariableSource, Environment},
     error::RunnerError,
 };
 use clap::ValueEnum;
@@ -39,7 +39,21 @@ impl Section {
         }
     }
 
-    fn get_section(name: &str) -> Section {
+    pub fn map_section(yml_name: &str) -> &str {
+        match yml_name {
+            "prebuild" => "PreBuild",
+            "build" => "Build",
+            "postbuild" => "PostBuild",
+            "test" => "Test",
+            "predeploy" => "PreDeploy",
+            "deploy" => "Deploy",
+            "postdeploy" => "PostDeploy",
+            "clean" => "Clean",
+            _ => "Unknown",
+        }
+    }
+
+    pub fn get_section(name: &str) -> Section {
         match name {
             "PreBuild" => Section::PreBuild,
             "Build" => Section::Build,
@@ -54,33 +68,90 @@ impl Section {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct RunOptions<'a> {
-    /// OS to target: "windows" | "linux" | "macos"
-    pub os: &'a str,
-    /// Working directory for all commands.
-    pub cwd: Option<PathBuf>,
-    pub extra_env: HashMap<String, String>,
-    /// If true, keep going after failures and report at end.
-    pub continue_on_error: bool,
-    /// If true, print commands but don't execute.
-    pub dry_run: bool,
-    /// Optional subset of sections to execute (preserving original order).
-    pub sections: Option<Vec<Section>>,
-}
-
-fn commands_for_os<'a>(pc: &'a PlatformCommands, os: &str) -> Option<&'a Vec<String>> {
+fn commands_for_os<'a>(
+    pc: &'a PlatformCommands,
+    env: &mut Environment<'a>,
+    os: &str,
+) -> Option<&'a Vec<String>> {
     match os {
-        "windows" => pc.windows.steps.as_ref(),
-        "linux" => pc.linux.steps.as_ref(),
-        "macos" => pc.macos.steps.as_ref(),
+        "windows" => {
+            if pc.windows.is_some() {
+                let current = pc.windows.as_ref().unwrap();
+                if current.local_config.is_some() {
+                    if let Some(env_vars) = &current.local_config.as_ref().unwrap().env {
+                        for (key, value) in env_vars {
+                            env.upsert_variable(
+                                key.to_string(),
+                                value.to_string(),
+                                EnvVariableSource::Local,
+                            );
+                        }
+                    }
+                    if let Some(exec_policy) =
+                        &current.local_config.as_ref().unwrap().execution_policy
+                    {
+                        env.execution_policy = exec_policy.clone();
+                    }
+                }
+                current.steps.as_ref()
+            } else {
+                None
+            }
+        }
+        "linux" => {
+            if pc.linux.is_some() {
+                let current = pc.linux.as_ref().unwrap();
+                if current.local_config.is_some() {
+                    if let Some(env_vars) = &current.local_config.as_ref().unwrap().env {
+                        for (key, value) in env_vars {
+                            env.upsert_variable(
+                                key.to_string(),
+                                value.to_string(),
+                                EnvVariableSource::Local,
+                            );
+                        }
+                    }
+                    if let Some(exec_policy) =
+                        &current.local_config.as_ref().unwrap().execution_policy
+                    {
+                        env.execution_policy = exec_policy.clone();
+                    }
+                }
+                current.steps.as_ref()
+            } else {
+                None
+            }
+        }
+        "macos" => {
+            if pc.macos.is_some() {
+                let current = pc.macos.as_ref().unwrap();
+                if current.local_config.is_some() {
+                    if let Some(env_vars) = &current.local_config.as_ref().unwrap().env {
+                        for (key, value) in env_vars {
+                            env.upsert_variable(
+                                key.to_string(),
+                                value.to_string(),
+                                EnvVariableSource::Local,
+                            );
+                        }
+                    }
+                    if let Some(exec_policy) =
+                        &current.local_config.as_ref().unwrap().execution_policy
+                    {
+                        env.execution_policy = exec_policy.clone();
+                    }
+                }
+                current.steps.as_ref()
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
 
-pub fn run(config: &Config, opts: &mut RunOptions) -> Result<(), RunnerError> {
-    let mut overall_failures: Vec<String> = Vec::new();
-    let filter: Option<std::collections::HashSet<&'static str>> = opts
+pub fn run(config: &Config, env: &mut Environment) -> Result<(), RunnerError> {
+    let filter: Option<std::collections::HashSet<&'static str>> = env
         .sections
         .as_ref()
         .map(|v| v.iter().map(|s| s.as_str()).collect());
@@ -90,29 +161,39 @@ pub fn run(config: &Config, opts: &mut RunOptions) -> Result<(), RunnerError> {
                 continue;
             }
         } else if section_name == Section::Clean.as_str()
-            || section_name == Section::PostDeploy.as_str()
-            || section_name == Section::Deploy.as_str()
+            && env.banned_sections.is_some()
+            && env
+                .banned_sections
+                .as_ref()
+                .unwrap()
+                .contains(&Section::get_section(section_name))
         {
             continue;
         }
         match commands {
             Some(c) => {
-                let result = match commands_for_os(c, opts.os) {
-                    Some(cmds) => run_section(section_name, config, cmds, opts),
+                let mut section_environment = env.clone();
+                let result = match commands_for_os(c, &mut section_environment, env.os) {
+                    Some(cmds) => run_section(section_name, config, cmds, &section_environment),
                     None => {
                         continue;
                     }
                 };
                 match result {
-                    Ok(_) => {}
+                    Ok(new_env) => {
+                        env.merge_env(new_env);
+                    }
                     Err(e) => {
-                        if opts.continue_on_error {
+                        if section_environment.execution_policy == ExecutionPolicy::CarryFroward {
                             warn!(
                                 "{}",
-                                format!("section '{}' failed with error: {}", section_name, e)
-                                    .yellow()
+                                format!(
+                                    "Section '{}' failed, carrying forward because global execution policy is CarryForward",
+                                    section_name,
+                                )
+                                .to_string()
+                                .yellow()
                             );
-                            overall_failures.push(format!("section '{}': {:?}", section_name, e));
                         } else {
                             return Err(e);
                         }
@@ -124,18 +205,15 @@ pub fn run(config: &Config, opts: &mut RunOptions) -> Result<(), RunnerError> {
             }
         };
     }
-    if !overall_failures.is_empty() {
-        return Err(RunnerError::CmdFailed(overall_failures.join("\n")));
-    }
     Ok(())
 }
 
-pub fn run_section(
+pub fn run_section<'a>(
     section_name: &str,
     config: &Config,
     tasks: &Vec<String>,
-    opts: &mut RunOptions,
-) -> Result<(), RunnerError> {
+    env: &'a Environment,
+) -> Result<Environment<'a>, RunnerError> {
     info!(
         "{}",
         format!(
@@ -144,19 +222,83 @@ pub fn run_section(
         )
         .blue()
     );
-    run_tasks(tasks, config, opts, section_name)
+    run_tasks(tasks, config, env, section_name)
 }
 
-pub fn run_block(
+pub fn run_block<'a>(
     block_name: &str,
     config: &Config,
-    opts: &mut RunOptions,
-) -> Result<(), RunnerError> {
+    env: &'a Environment,
+) -> Result<Environment<'a>, RunnerError> {
     info!("{}", format!("--- [Block: {}] ---", block_name).magenta());
+    let mut block_environment = env.clone();
     if let Some(tasks) = config.blocks.get(block_name) {
         match &tasks.steps {
-            Some(steps) => run_tasks(steps, config, opts, block_name),
-            None => Ok(()),
+            Some(steps) => {
+                if config
+                    .blocks
+                    .get(block_name)
+                    .unwrap()
+                    .local_config
+                    .is_some()
+                {
+                    if let Some(env_vars) = &config
+                        .blocks
+                        .get(block_name)
+                        .unwrap()
+                        .local_config
+                        .as_ref()
+                        .unwrap()
+                        .env
+                    {
+                        for (key, value) in env_vars {
+                            block_environment.upsert_variable(
+                                key.to_string(),
+                                value.to_string(),
+                                EnvVariableSource::Local,
+                            );
+                        }
+                    }
+                    if let Some(exec_policy) = &config
+                        .blocks
+                        .get(block_name)
+                        .unwrap()
+                        .local_config
+                        .as_ref()
+                        .unwrap()
+                        .execution_policy
+                    {
+                        block_environment.execution_policy = exec_policy.clone();
+                    }
+                }
+
+                let current_environment = block_environment.clone();
+
+                let res = run_tasks(steps, config, &current_environment, block_name);
+                let out: Result<Environment, RunnerError> = match res {
+                    Ok(new_env) => {
+                        block_environment.merge_env(new_env);
+                        return Ok(block_environment);
+                    }
+                    Err(e) => Err(e),
+                };
+
+                if out.is_err() {
+                    if env.execution_policy == ExecutionPolicy::CarryFroward {
+                        let internal_error = out.err().unwrap().to_string().yellow();
+                        warn!("{}", internal_error);
+                        warn!("{}", format!("Block '{}' failed silently, moving forward because the parent execution policy is CarryForward", block_name).yellow());
+                        Ok(block_environment)
+                    } else {
+                        let internal_error = out.as_ref().err().unwrap().to_string().red();
+                        error!("{}", internal_error);
+                        out
+                    }
+                } else {
+                    out
+                }
+            }
+            None => Ok(block_environment),
         }
     } else {
         Err(RunnerError::CmdFailed(format!(
@@ -166,108 +308,115 @@ pub fn run_block(
     }
 }
 
-pub fn run_tasks(
+pub fn run_tasks<'a>(
     tasks: &Vec<String>,
     config: &Config,
-    opts: &mut RunOptions,
+    env: &'a Environment,
     parent_name: &str,
-) -> Result<(), RunnerError> {
+) -> Result<Environment<'a>, RunnerError> {
     let order = tasks;
-
-    let mut failures: Vec<String> = Vec::new();
+    let mut new_env = env.clone();
 
     for task in order {
-        if task.trim().is_empty() {
+        info!("{} {}", "$".cyan(), task.cyan());
+
+        if env.dry_run || task.trim().is_empty() {
             continue;
         }
-        if task.split(" ").collect::<Vec<&str>>().len() == 1
-            && !task.starts_with("'")
-            && !task.starts_with("\"")
-        {
-            // This is a block reference
+
+        let task = task.trim();
+        let is_block = task.split(' ').count() == 1
+            && !task.starts_with('\'')
+            && !task.starts_with('"')
+            && config.blocks.contains_key(task);
+        if is_block {
             let block_name = task.trim();
             if config.blocks.contains_key(block_name) {
-                match run_block(block_name, config, opts) {
-                    Ok(_) => {}
-                    Err(e) => {
+                let current_environment = new_env.clone();
+                match run_block(block_name, config, &current_environment) {
+                    Ok(result_env) => {
+                        new_env.merge_env(result_env);
+                    }
+                    Err(_) => {
                         let msg = format!(
-                            "Block '{}' execution failed in parent '{}': {}",
-                            block_name, parent_name, e
+                            "Block '{}' execution failed in parent '{}'",
+                            block_name, parent_name
                         );
-                        if opts.continue_on_error {
-                            warn!("{}", msg);
-                            failures.push(msg);
+                        if env.execution_policy == ExecutionPolicy::CarryFroward {
+                            warn!("{}", msg.yellow());
+                            // failures.push(msg);
                         } else {
                             return Err(RunnerError::CmdFailed(msg));
                         }
                     }
                 }
             }
-        }
-        info!("{} {}", "$".cyan(), task.cyan());
-        if opts.dry_run {
-            continue;
-        }
-        match run_shell(task, opts) {
-            Ok(status) if status.success() => {}
-            Ok(status) => {
-                let msg = format!(
-                    "Parent '{}' command failed: '{}' (exit {:?})",
-                    parent_name,
-                    task,
-                    status.code()
-                );
-                if opts.continue_on_error {
-                    warn!("{}", msg);
-                    failures.push(msg);
-                } else {
-                    return Err(RunnerError::CmdFailed(msg));
+        } else {
+            let current_environment = new_env.clone();
+            let res: Result<(ExitStatus, Environment), RunnerError> =
+                run_shell(task, &current_environment);
+            match res {
+                Ok((status, result_env)) => {
+                    if status.success() {
+                        new_env.merge_env(result_env);
+                    } else {
+                        let msg = format!(
+                            "Parent '{}' command failed: '{}' (exit {:?})",
+                            parent_name,
+                            task,
+                            status.code()
+                        );
+                        if env.execution_policy == ExecutionPolicy::CarryFroward {
+                            warn!("{}", msg.yellow());
+                            // failures.push(msg);
+                        } else {
+                            return Err(RunnerError::CmdFailed(msg));
+                        }
+                    }
                 }
-            }
-            Err(e) => {
-                let msg = format!(
-                    "Parent '{}' command spawn error: '{}' -> {}",
-                    parent_name, task, e
-                );
-                if opts.continue_on_error {
-                    warn!("{}", msg);
-                    failures.push(msg);
-                } else {
-                    return Err(RunnerError::CmdFailed(msg));
+                Err(e) => {
+                    let msg = format!(
+                        "Parent '{}' command spawn error: '{}' -> {}",
+                        parent_name, task, e
+                    );
+                    if env.execution_policy == ExecutionPolicy::CarryFroward {
+                        warn!("{}", msg.yellow());
+                        // failures.push(msg);
+                    } else {
+                        return Err(RunnerError::CmdFailed(msg));
+                    }
                 }
             }
         }
     }
 
-    if !failures.is_empty() {
-        let joined = failures.join("\n");
-        return Err(RunnerError::CmdFailed(joined));
-    }
-
-    Ok(())
+    Ok(new_env)
 }
 
-fn run_shell(cmdline: &str, opts: &mut RunOptions) -> Result<ExitStatus, RunnerError> {
-    let mut cmd = if opts.os == "windows" {
+fn run_shell<'a>(
+    cmdline: &str,
+    env: &'a Environment,
+) -> Result<(ExitStatus, Environment<'a>), RunnerError> {
+    let mut cmd = if env.os == "windows" {
         let mut c = Command::new("cmd");
         c.arg("/C")
-            .arg(cmdline.to_string() + "; set > .env.vars.zbuild");
+            .arg(cmdline.to_string() + "&& set > .env.vars.zbuild");
         c.env("TERM", "xterm-256color");
         c.env("ANSICON", "1");
         c
     } else {
         let mut c = Command::new("sh");
         c.arg("-c")
-            .arg(cmdline.to_string() + "; env > .env.vars.zbuild");
+            .arg(cmdline.to_string() + "&& env > .env.vars.zbuild");
         c.env("TERM", "xterm-256color");
         c
     };
 
-    if let Some(ref dir) = opts.cwd {
+    if let Some(ref dir) = env.cwd {
         cmd.current_dir(dir);
     }
-    for (k, v) in &opts.extra_env {
-        cmd.env(k, v);
+    for (k, v) in &env.variables {
+        cmd.env(k, v.value.clone());
     }
 
     let mut child = cmd
@@ -279,24 +428,18 @@ fn run_shell(cmdline: &str, opts: &mut RunOptions) -> Result<ExitStatus, RunnerE
     let status = child.wait()?;
 
     // Read .env.vars from previous command if exists
-    let env_vars_path = if let Some(ref dir) = opts.cwd {
+    let env_vars_path = if let Some(ref dir) = env.cwd {
         dir.join(".env.vars.zbuild")
     } else {
         PathBuf::from(".env.vars.zbuild")
     };
 
+    let mut new_environment = env.clone();
+
     if env_vars_path.exists()
         && let Ok(content) = std::fs::read_to_string(&env_vars_path)
     {
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Some((k, v)) = line.split_once('=') {
-                opts.extra_env.insert(k.to_string(), v.to_string());
-            }
-        }
+        new_environment.load_env(content, EnvVariableSource::Script);
     }
 
     // Clean up .env.vars after reading
@@ -304,5 +447,5 @@ fn run_shell(cmdline: &str, opts: &mut RunOptions) -> Result<ExitStatus, RunnerE
         let _ = std::fs::remove_file(&env_vars_path);
     }
 
-    Ok(status)
+    Ok((status, new_environment))
 }
