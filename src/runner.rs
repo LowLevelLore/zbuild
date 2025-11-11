@@ -161,12 +161,12 @@ pub fn run(config: &Config, env: &mut Environment) -> Result<(), RunnerError> {
                 continue;
             }
         } else if section_name == Section::Clean.as_str()
-            && env.banned_sections.is_some()
-            && env
-                .banned_sections
-                .as_ref()
-                .unwrap()
-                .contains(&Section::get_section(section_name))
+            || (env.banned_sections.is_some()
+                && env
+                    .banned_sections
+                    .as_ref()
+                    .unwrap()
+                    .contains(&Section::get_section(section_name)))
         {
             continue;
         }

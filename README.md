@@ -65,7 +65,7 @@ zbuild [OPTIONS] [FILE]
 | --env-file `<FILE>`       | Load environment variables from a file.                                                                                     | [Any valid file path, that has valid key value pairs]                    |
 | `-v`, `-vv`, `-vvv`   | Increase logging verbosity.                                                                                                 | FLAGS                                                                    |
 
-## Example
+## Documentation
 
 All the sections are optional, the sections present in the yml file will be ran automatically in the below mentioned relative order, meaning if postbuild is not present this tool will skip to test section after build section.
 
@@ -126,7 +126,130 @@ config: # Global configuration
 	execution_policy: fast_fail # Applied to all the sections and all the block (if blocks dont override)
 	envs: 
 		KEY1: VALUE1
-		KEY2: VALUE2
+		KEY2: VALUE
+```
+
+## Example
+
+The self hoisting part, where zbuild handles the own building and deployment (push to github) is mentioned below, which can be used as an extensive example for the documentation.
+
+```yaml
+tasks:
+  prebuild:
+    linux:
+      steps:
+        - echo "Prebuild (linux)"
+        - build_common
+    macos:
+      steps:
+        - echo "Prebuild (macos)"
+        - build_common
+    windows:
+      steps:
+        - echo Prebuild (windows)
+        - build_common
+
+  build:
+    linux: &cargo_build
+      steps:
+        - cargo build --release
+    macos:
+      <<: *cargo_build
+    windows:
+      <<: *cargo_build
+
+  test:
+    linux: &test_steps
+      steps:
+        - test_cargo
+    macos:
+      <<: *test_steps
+    windows:
+      <<: *test_steps
+
+  predeploy:
+    linux:
+      steps:
+        - mkdir -p dist
+        - test -f "target/release/${BIN}" || { echo "missing target/release/${BIN}. Did you run build?"; exit 1; }
+        - cp "target/release/${BIN}" "dist/${BIN}"
+        - echo "Packaged ${BIN} ${VERSION} -> dist/"
+      config: &predeploy_config
+        env:
+          VERSION: "0.1.0"
+    macos:
+      steps:
+        - mkdir -p dist
+        - test -f "target/release/${BIN}" || { echo "missing "target/release/${BIN}". Run build first."; exit 1; }
+        - cp "target/release/${BIN}" "dist/${BIN}"
+        - (command -v strip >/dev/null 2>&1 && strip -x "dist/${BIN}") || true
+        - echo "Packaged ${BIN} ${VERSION} -> dist/"
+      config: 
+        <<: *predeploy_config
+    windows:
+      steps:
+        - powershell -Command "$ErrorActionPreference=Stop"
+        - powershell -Command "New-Item -ItemType Directory -Force -Path dist | Out-Null"
+        - powershell -Command "$env:BIN = zbuild"
+        - powershell -Command "$src = \"target\\release\\$env:BIN.exe\""
+        - powershell -Command "if (!(Test-Path $src)) { throw \"missing $src. Run build first.\" }"
+        - powershell -Command "Copy-Item $src dist\\"
+        - powershell -Command "Write-Output \"Packaged $env:BIN -> dist\\\""
+
+  deploy:
+    linux: &deploy_sh
+      steps:
+        - echo "Deploying…"
+        - ls -lah .
+        - git add . || true
+        - if git diff-index --quiet HEAD --; then echo "No changes to deploy. Skipping commit and push."; exit 0; fi
+        - git commit -m "${COMMIT_MESSAGE:-Automated deployment commit}"
+        - echo "Pushing to origin main…"
+        - git push origin main
+        - echo "Deploy complete."
+    macos:
+      <<: *deploy_sh
+    windows:
+      steps:
+        - powershell -Command "Write-Host Deploying…"
+        - powershell -Command "Get-ChildItem -Force ."
+        - powershell -Command "git add . 2>$null"
+        - powershell -Command "$diff = git diff-index --quiet HEAD --; if ($LASTEXITCODE -eq 0) { Write-Host No changes to deploy. Skipping commit and push.; exit 0 }"
+        - powershell -Command "git commit -m \"$(if ($env:COMMIT_MESSAGE) { $env:COMMIT_MESSAGE } else { Automated deployment commit })\""
+        - powershell -Command "Write-Host Pushing to origin main…"
+        - powershell -Command "git push origin main"
+        - powershell -Command "Write-Host Deploy complete."
+
+  clean:
+    linux: &clean_sh
+      steps:
+        - rm -rf target/ dist/
+        - echo "Cleaned."
+    macos:
+      <<: *clean_sh
+    windows:
+      steps:
+        - rmdir /S /Q target 2>nul & rmdir /S /Q dist 2>nul & echo Cleaned.
+
+blocks:
+  build_common:
+    steps:
+      - rustc --version
+      - cargo --version
+      - cargo fmt --all -- --check
+  test_cargo:
+    steps:
+      - cargo clippy --all-targets --all-features -- -D warnings
+      - cargo test --all -- --nocapture
+
+config:
+  skip_sections:
+    - predeploy
+    - deploy
+    - clean
+  execution_policy: fast_fail
+  env:
+    BIN: zbuild
 
 ```
 
@@ -138,11 +261,13 @@ zbuild ./ZMake.yml --env SECRET=refree
 
 **Self hoisting:**
 
-![1762683877330](image/README/1762683877330.png)
+![1762897244938](image/README/1762897244938.png)
+
+**Make Artifacts and push to github:**
+
 
 **Clean the build:**
 
-![1762683771081](image/README/1762683771081.png)
 
 ## LICENSE
 
