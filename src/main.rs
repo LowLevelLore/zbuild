@@ -138,7 +138,6 @@ fn real_main() -> Result<(), RunnerError> {
     }
 
     for (k, v) in cli.envs {
-        println!("Inserting CLI ENV {}", k);
         global_environment.upsert_variable(k, v, environment::EnvVariableSource::Passed);
     }
     if let Some(env_file) = cli.env_file {
