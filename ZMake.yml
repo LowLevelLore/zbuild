@@ -1,3 +1,4 @@
+# zbuild.yml — concise, same behavior
 tasks:
   prebuild:
     linux:
@@ -9,29 +10,27 @@ tasks:
         - echo "Prebuild (macos)"
         - build_common
     windows:
-      steps:     
+      steps:
         - echo Prebuild (windows)
         - build_common
+
   build:
-    linux:
+    linux: &cargo_build
       steps:
         - cargo build --release
     macos:
-      steps:
-        - cargo build --release
+      <<: *cargo_build
     windows:
-      steps:
-        - cargo build --release
+      <<: *cargo_build
+
   test:
-    linux:
+    linux: &test_steps
       steps:
         - test_cargo
     macos:
-      steps:
-        - test_cargo
+      <<: *test_steps
     windows:
-      steps:
-        - test_cargo
+      <<: *test_steps
 
   predeploy:
     linux:
@@ -60,10 +59,10 @@ tasks:
         - powershell -Command "$src = \"target\\release\\$env:BIN.exe\""
         - powershell -Command "if (!(Test-Path $src)) { throw \"missing $src. Run build first.\" }"
         - powershell -Command "Copy-Item $src dist\\"
-        - powershell -Command "Write-Output \"Packaged $env:BIN -> dist\\\"" 
+        - powershell -Command "Write-Output \"Packaged $env:BIN -> dist\\\""
 
   deploy:
-    linux:
+    linux: &deploy_sh
       steps:
         - echo "Deploying…"
         - ls -lah .
@@ -74,15 +73,7 @@ tasks:
         - git push origin main
         - echo "Deploy complete."
     macos:
-      steps:
-        - echo "Deploying…"
-        - ls -lah .
-        - git add . || true
-        - if git diff-index --quiet HEAD --; then echo "No changes to deploy. Skipping commit and push."; exit 0; fi
-        - git commit -m "${COMMIT_MESSAGE:-Automated deployment commit}"
-        - echo "Pushing to origin main…"
-        - git push origin main
-        - echo "Deploy complete."
+      <<: *deploy_sh
     windows:
       steps:
         - powershell -Command "Write-Host Deploying…"
@@ -95,14 +86,12 @@ tasks:
         - powershell -Command "Write-Host Deploy complete."
 
   clean:
-    linux:
+    linux: &clean_sh
       steps:
         - rm -rf target/ dist/
         - echo "Cleaned."
     macos:
-      steps:
-        - rm -rf target/ dist/
-        - echo "Cleaned."
+      <<: *clean_sh
     windows:
       steps:
         - rmdir /S /Q target 2>nul & rmdir /S /Q dist 2>nul & echo Cleaned.

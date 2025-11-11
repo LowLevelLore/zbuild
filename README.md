@@ -58,7 +58,7 @@ zbuild [OPTIONS] [FILE]
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | --cwd `<DIR>`             | Working directory for execution. If omitted, uses current directory.                                                        | [Any valid directory path]                                               |
 | --os `<OS>`               | Which os specific commands to run ? If the detected OS doesnt match the passed OS, dry run mode will be applied by default. | [windows, linux, macos]                                                  |
-| --sections `<SECTION>`    | Run only the specified sections. Can be repeated. Clean will only be called when passed explicitly                          | [prebuild, build, postbuild, test, predeploy, deploy, postdeploy, clean] |
+| --section `<SECTION>`     | Run only the specified sections. Can be repeated. Clean will only be called when passed explicitly                          | [prebuild, build, postbuild, test, predeploy, deploy, postdeploy, clean] |
 | --continue-on-error         | Continue executing remaining tasks if one fails.                                                                            | FLAG                                                                     |
 | --dry-run                   | Print commands instead of executing them.                                                                                   | FLAG                                                                     |
 | --env `<KEY>`=`<VALUE>` | Inject extra environment variables (repeatable).                                                                            | [Any valid key value pair, must be passed as a string without quotes]    |
@@ -70,45 +70,65 @@ zbuild [OPTIONS] [FILE]
 All the sections are optional, the sections present in the yml file will be ran automatically in the below mentioned relative order, meaning if postbuild is not present this tool will skip to test section after build section.
 
 ```yaml
-prebuild: # Install build dependencies
-	linux:
-		- echo "Hello from linux"
-		- echo "Some $SECRET"
-	windows:
-		- echo "Hello from Windows"
-	macos:
-		- echo "Hello from MACOS"
-build: # Actual building
-	linux:
-	windows:
-	macos:
-postbuild: # Remove those dependencies
-	linux:
-	windows:
-	macos:
-test: # Testing
-	linux:
-	windows:
-	macos:
-predeploy: # Some Configurations
-	linux:
-	windows:
-	macos:
-deploy: # Actual deployment
-	linux:
-	windows:
-	macos:
-postdeploy: # Notifications/Alerts
-	linux:
-	windows:
-	macos:
-clean: # Will only be ran if explicitly passed
-	linux: 
-		- "rm -rf target/"
-	windows:
-	macos:
-```
+tasks:
+	prebuild: # Any out of the following 8 predefined sections (relative order must be same)
+		linux: # A block, a section can have a maximum of 3 predefind blocks (same name), also defining all 3 is recommended.
+			steps: # Steps to run in this block
+				- echo "Hello from Linux"
+				- export DIR_NAME="build" # This environment variable will be available to all subsequent commands, it will have the greatest priority, will not be overwritten by local env variables
+				- make_directory # This will call a block of code, mentioned in blocks given below.
+				- echo "Some $KEY1"
+			config: # configuration local to this block
+				execution_policy: fast_fail # Can also be carry_forward
+				env: # Defining local environment variables, override global and default variales
+					KEY1: VALUE1
+					KEY2: VALUE2
 
+		windows:
+			steps:
+				- echo "Hello from Windows"
+				- echo "Some $SECRET"
+			config:
+				execution_policy: fast_fail # Can also be carry_forward
+				env:
+					KEY1: VALUE1
+					KEY2: VALUE2
+		macos:
+			steps:
+				- echo "Hello from Windows"
+				- echo "Some $SECRET"
+			config:
+				execution_policy: fast_fail # Can also be carry_forward
+				env:
+					KEY1: VALUE1
+					KEY2: VALUE2
+	# Other 7 sections may include the following, each section will have the corresponding 3 blocks
+	build: 
+	postbuild:
+	test:
+	predeploy:
+	deploy:
+	postdeploy:
+	clean: # (Will only be ran if explicitly mentioned while running 'zbuild')
+
+blocks:
+	make_directory: # A reusable block of code, this can be invoked from the 8 predefined steps
+		steps:
+			- echo "Making Directory $DIR_NAME"
+			- mkdir $DIR_NAME
+		config:
+			execution_policy: carry_forward
+
+config: # Global configuration
+	skip_sections: # Sections mentioned here will only be run if explicitly passed to the executable under --section <name>
+		- predeploy
+		- clean # No need to mention, by default it is skipped
+	execution_policy: fast_fail # Applied to all the sections and all the block (if blocks dont override)
+	envs: 
+		KEY1: VALUE1
+		KEY2: VALUE2
+
+```
 
 ### Usage
 
