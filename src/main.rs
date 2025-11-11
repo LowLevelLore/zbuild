@@ -137,12 +137,13 @@ fn real_main() -> Result<(), RunnerError> {
         }
     }
 
-    for (k, v) in cli.envs {
-        global_environment.upsert_variable(k, v, environment::EnvVariableSource::Passed);
-    }
     if let Some(env_file) = cli.env_file {
         let content = fs::read_to_string(env_file)?;
         global_environment.load_env(content, environment::EnvVariableSource::Passed);
+    }
+
+    for (k, v) in cli.envs {
+        global_environment.upsert_variable(k, v, environment::EnvVariableSource::Passed);
     }
 
     global_environment.os = os;

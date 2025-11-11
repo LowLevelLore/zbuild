@@ -129,6 +129,16 @@ config: # Global configuration
 		KEY2: VALUE
 ```
 
+### Hierarchy of environment variables:
+
+The following is the heirarchy of the environment variables that we either define in config, pass to the executable, or create/update on the run. The following list is in the increasing order of priority, a variable with low priority of its source can be replaced by the low priority of the source.
+
+1. **Default** (variables already in the shell context)
+2. **Global** (Mentioned in the global configuration)
+3. **Local** (Mentioned in the local configuration)
+4. **Passed** (Passed to the executable either via command line using the '--env' flag or '--env-file' flag, both are same priority, but '--env' overrides the file version)
+5. **Script** (When a environment variable is defined at any point in the script, it will replace any matching variable, if we have a global variable X: a and we somewhere encounter export X=b, then all the subsequent calls of Z will have vaue of b)
+
 ## Example
 
 The self hoisting part, where zbuild handles the own building and deployment (push to github) is mentioned below, which can be used as an extensive example for the documentation.
@@ -255,19 +265,17 @@ config:
 
 ### Usage
 
-```bash
-zbuild ./ZMake.yml --env SECRET=refree
-```
-
-**Self hoisting:**
+**Normal build:**
 
 ![1762897244938](image/README/1762897244938.png)
 
 **Make Artifacts and push to github:**
 
+![1762897513241](image/README/1762897513241.png)
 
 **Clean the build:**
 
+![1762897561001](image/README/1762897561001.png)
 
 ## LICENSE
 
