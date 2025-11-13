@@ -68,7 +68,7 @@ tasks:
       steps:
         - git add .
         - git status --porcelain >nul && (echo No changes to deploy. Skipping commit and push. & exit 0)
-        - if defined COMMIT_MESSAGE (echo %COMMIT_MESSAGE% | git commit -F -) else (git commit -m "Automated deployment commit")
+        - if defined COMMIT_MESSAGE (echo %COMMIT_MESSAGE% | git -c user.name="LowLevelLore" -c user.email="mihirom9876@gmail.com" commit -F -) else (git -c user.name="LowLevelLore" -c user.email="mihirom9876@gmail.com" commit -m "Automated deployment commit")
         - echo Pushing to origin main...
         - git push origin main
         - echo Deploy complete.
