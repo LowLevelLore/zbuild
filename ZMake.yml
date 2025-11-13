@@ -66,13 +66,14 @@ tasks:
     macos: *deploy_sh
     windows:
       steps:
-        - echo "Deploying…"
         - git add .
-        - powershell -NoProfile -Command "if ((git status --porcelain) -eq '') { Write-Host 'No changes to deploy. Skipping commit and push.'; exit 0 }"
-        - powershell -Command "if (`$env:COMMIT_MESSAGE) { git commit -m `$env:COMMIT_MESSAGE } else { git commit -m 'Automated deployment commit' }"        
-        - powershell -Command "Write-Host Pushing to origin main…"
-        - powershell -Command "git push origin main"
-        - powershell -Command "Write-Host Deploy complete."
+        - git status --porcelain >nul && (echo No changes to deploy. Skipping commit and push. & exit 0)
+        - if defined COMMIT_MESSAGE (echo %COMMIT_MESSAGE% | git commit -F -) else (git commit -m "Automated deployment commit")
+        - echo Pushing to origin main...
+        - git push origin main
+        - echo Deploy complete.
+
+
 
   clean:
     linux: &clean_sh
