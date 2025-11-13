@@ -63,7 +63,7 @@ impl Section {
             "Deploy" => Section::Deploy,
             "PostDeploy" => Section::PostDeploy,
             "Clean" => Section::Clean,
-            _ => panic!("unknown section name: {}", name),
+            _ => panic!("unknown section name: {name}"),
         }
     }
 }
@@ -181,15 +181,14 @@ pub fn run(config: &Config, env: &mut Environment) -> Result<(), RunnerError> {
                 };
                 match result {
                     Ok(new_env) => {
-                        env.merge_env(new_env);
+                        env.merge_env(new_env.clone());
                     }
                     Err(e) => {
                         if section_environment.execution_policy == ExecutionPolicy::CarryFroward {
                             warn!(
                                 "{}",
                                 format!(
-                                    "Section '{}' failed, carrying forward because global execution policy is CarryForward",
-                                    section_name,
+                                    "Section '{section_name}' failed, carrying forward because global execution policy is CarryForward",
                                 )
                                 .to_string()
                                 .yellow()
@@ -230,7 +229,7 @@ pub fn run_block<'a>(
     config: &Config,
     env: &'a Environment,
 ) -> Result<Environment<'a>, RunnerError> {
-    info!("{}", format!("--- [Block: {}] ---", block_name).magenta());
+    info!("{}", format!("--- [Block: {block_name}] ---").magenta());
     let mut block_environment = env.clone();
     if let Some(tasks) = config.blocks.get(block_name) {
         match &tasks.steps {
@@ -286,12 +285,12 @@ pub fn run_block<'a>(
                 if out.is_err() {
                     if env.execution_policy == ExecutionPolicy::CarryFroward {
                         let internal_error = out.err().unwrap().to_string().yellow();
-                        warn!("{}", internal_error);
-                        warn!("{}", format!("Block '{}' failed silently, moving forward because the parent execution policy is CarryForward", block_name).yellow());
+                        warn!("{internal_error}");
+                        warn!("{}", format!("Block '{block_name}' failed silently, moving forward because the parent execution policy is CarryForward").yellow());
                         Ok(block_environment)
                     } else {
                         let internal_error = out.as_ref().err().unwrap().to_string().red();
-                        error!("{}", internal_error);
+                        error!("{internal_error}");
                         out
                     }
                 } else {
@@ -302,8 +301,7 @@ pub fn run_block<'a>(
         }
     } else {
         Err(RunnerError::CmdFailed(format!(
-            "Block '{}' not found",
-            block_name
+            "Block '{block_name}' not found"
         )))
     }
 }
@@ -339,8 +337,7 @@ pub fn run_tasks<'a>(
                     }
                     Err(_) => {
                         let msg = format!(
-                            "Block '{}' execution failed in parent '{}'",
-                            block_name, parent_name
+                            "Block '{block_name}' execution failed in parent '{parent_name}'"
                         );
                         if env.execution_policy == ExecutionPolicy::CarryFroward {
                             warn!("{}", msg.yellow());
@@ -375,10 +372,8 @@ pub fn run_tasks<'a>(
                     }
                 }
                 Err(e) => {
-                    let msg = format!(
-                        "Parent '{}' command spawn error: '{}' -> {}",
-                        parent_name, task, e
-                    );
+                    let msg =
+                        format!("Parent '{parent_name}' command spawn error: '{task}' -> {e}");
                     if env.execution_policy == ExecutionPolicy::CarryFroward {
                         warn!("{}", msg.yellow());
                         // failures.push(msg);
@@ -391,6 +386,23 @@ pub fn run_tasks<'a>(
     }
 
     Ok(new_env)
+}
+
+fn msys_path_to_windows(msys_path: &str) -> String {
+    let parts: Vec<String> = msys_path
+        .split(':')
+        .map(|p| {
+            if p.len() >= 3 && p.as_bytes()[0] == b'/' && p.as_bytes()[2] == b'/' {
+                let drive = p.chars().nth(1).unwrap().to_ascii_uppercase();
+                let rest = &p[3..];
+                let back = rest.replace('/', r"\");
+                format!("{drive}:\\{back}")
+            } else {
+                p.to_string()
+            }
+        })
+        .collect();
+    parts.join(";")
 }
 
 fn run_shell<'a>(
@@ -416,7 +428,16 @@ fn run_shell<'a>(
         cmd.current_dir(dir);
     }
     for (k, v) in &env.variables {
-        cmd.env(k, v.value.clone());
+        if env.os == "windows" && k == "PATH" {
+            let path_for_cmd = if v.value.contains("/c/") || v.value.contains("/C/") {
+                msys_path_to_windows(&v.value)
+            } else {
+                v.value.replace(':', ";")
+            };
+            cmd.env("PATH", &path_for_cmd);
+        } else {
+            cmd.env(k, v.value.clone());
+        }
     }
 
     let mut child = cmd

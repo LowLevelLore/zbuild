@@ -61,7 +61,7 @@ enum OsChoice {
 
 fn main() {
     if let Err(e) = real_main() {
-        error!("{}", format!("Error: {}", e).red());
+        error!("{}", format!("Error: {e}").red());
         process::exit(1);
     }
 }
@@ -88,8 +88,7 @@ fn real_main() -> Result<(), RunnerError> {
 
     if detected_os != "windows" && detected_os != "linux" && detected_os != "macos" {
         return Err(RunnerError::CmdFailed(format!(
-            "unsupported OS detected: {}",
-            detected_os
+            "unsupported OS detected: {detected_os}"
         )));
     }
 
@@ -104,8 +103,7 @@ fn real_main() -> Result<(), RunnerError> {
         warn!(
             "{}",
             format!(
-                "Overriding detected OS '{}' with user-specified OS '{}'. We are forcing dry-run mode.",
-                detected_os, os
+                "Overriding detected OS '{detected_os}' with user-specified OS '{os}'. We are forcing dry-run mode."
             )
             .yellow()
         );

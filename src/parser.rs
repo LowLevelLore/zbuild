@@ -21,15 +21,13 @@ fn validate_config(_config: &Config) -> Result<(), RunnerError> {
     _config.blocks.iter().try_for_each(|(block_name, _)| {
         if SECTIONS.contains(&block_name.as_str()) {
             return Err(RunnerError::Constraints(format!(
-                "Block name '{}' conflicts with reserved section name",
-                block_name
+                "Block name '{block_name}' conflicts with reserved section name"
             )));
         }
 
         if OPERATING_SYSTEMS.contains(&block_name.as_str()) {
             return Err(RunnerError::Constraints(format!(
-                "Block name '{}' conflicts with reserved operating system name",
-                block_name
+                "Block name '{block_name}' conflicts with reserved operating system name"
             )));
         }
 
@@ -46,8 +44,7 @@ pub fn parse_yaml(yaml: &str) -> Result<Config, RunnerError> {
             Err(e) => Err(e),
         },
         Err(e) => Err(RunnerError::CmdFailed(format!(
-            "failed to parse YAML config: {}",
-            e
+            "failed to parse YAML config: {e}"
         ))),
     }
 }
