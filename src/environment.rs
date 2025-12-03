@@ -7,7 +7,7 @@ use std::{
 
 #[derive(Debug, Default, Clone)]
 pub struct Environment<'a> {
-    pub variables: HashMap<String, EnvVariable>,
+    variables: HashMap<String, EnvVariable>,
     pub os: &'a str,
     pub cwd: Option<PathBuf>,
     pub execution_policy: ExecutionPolicy,
@@ -45,6 +45,19 @@ pub struct EnvVariable {
 }
 
 impl<'a> Environment<'a> {
+    pub fn get_variables(&self) -> &HashMap<String, EnvVariable> {
+        &self.variables
+    }
+
+    fn insert_variable(
+        &mut self,
+        key: String,
+        value: String,
+        source: EnvVariableSource,
+    ) -> Option<EnvVariable> {
+        self.variables.insert(key, EnvVariable { source, value })
+    }
+
     pub fn upsert_variable(
         &mut self,
         key: String,
@@ -52,61 +65,29 @@ impl<'a> Environment<'a> {
         source: EnvVariableSource,
     ) -> Option<EnvVariable> {
         if self.variables.contains_key(&key) {
-            if self.variables.get(&key).unwrap().source.get_priority() <= source.get_priority() {
-                return self.variables.insert(key, EnvVariable { source, value });
-            } else {
+            let old_priority = self.variables.get(&key).unwrap().source.get_priority();
+            let new_priority = source.get_priority();
+            if value == self.variables.get(&key).unwrap().value {
+                if new_priority > old_priority {
+                    self.insert_variable(key, value, source);
+                }
                 return None;
+            } else {
+                if new_priority >= old_priority {
+                    return self.insert_variable(key, value, source);
+                } else {
+                    return None;
+                }
             }
         }
-        self.variables.insert(key, EnvVariable { source, value })
+        return self.insert_variable(key, value, source);
     }
 
     pub fn merge_env(&mut self, other: Environment) {
-        let variables = &mut self.variables;
-
         for (key, origin_value) in other.variables.iter() {
             let new_origin = origin_value.source.clone();
             let new_value = origin_value.value.clone();
-
-            if variables.contains_key(key) {
-                let origin = variables.get(key).unwrap().source.clone();
-                let value = variables.get(key).unwrap().value.clone();
-                if new_origin != origin {
-                    if new_origin.get_priority() >= origin.get_priority() {
-                        variables.insert(
-                            key.to_string(),
-                            EnvVariable {
-                                source: new_origin,
-                                value: new_value.to_string(),
-                            },
-                        );
-                    } else {
-                        variables.insert(
-                            key.to_string(),
-                            EnvVariable {
-                                source: origin,
-                                value: value.to_string(),
-                            },
-                        );
-                    }
-                } else {
-                    variables.insert(
-                        key.to_string(),
-                        EnvVariable {
-                            source: new_origin,
-                            value: new_value,
-                        },
-                    );
-                }
-            } else {
-                variables.insert(
-                    key.to_string(),
-                    EnvVariable {
-                        source: new_origin,
-                        value: new_value,
-                    },
-                );
-            }
+            self.upsert_variable(key.to_string(), new_value, new_origin);
         }
     }
 
@@ -158,36 +139,13 @@ impl<'a> Environment<'a> {
     }
 
     pub fn load_env(&mut self, content: String, new_origin: EnvVariableSource) {
-        let variables = &mut self.variables;
-
-        let new_priority = new_origin.get_priority();
-
         for line in content.lines() {
             let line = line.trim();
             if line.is_empty() {
                 continue;
             }
             if let Some((key, new_value)) = line.split_once('=') {
-                if variables.get(key).is_some() {
-                    let old_origin = variables.get(key).unwrap().source.clone();
-                    if new_priority >= old_origin.get_priority() {
-                        variables.insert(
-                            key.to_string(),
-                            EnvVariable {
-                                source: new_origin.clone(),
-                                value: new_value.to_string(),
-                            },
-                        );
-                    }
-                } else {
-                    variables.insert(
-                        key.to_string(),
-                        EnvVariable {
-                            source: new_origin.clone(),
-                            value: new_value.to_string(),
-                        },
-                    );
-                }
+                self.upsert_variable(key.to_string(), new_value.to_string(), new_origin.clone());
             }
         }
     }

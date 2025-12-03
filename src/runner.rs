@@ -427,7 +427,7 @@ fn run_shell<'a>(
     if let Some(ref dir) = env.cwd {
         cmd.current_dir(dir);
     }
-    for (k, v) in &env.variables {
+    for (k, v) in env.get_variables() {
         if env.os == "windows" && k == "PATH" {
             let path_for_cmd = if v.value.contains("/c/") || v.value.contains("/C/") {
                 msys_path_to_windows(&v.value)
